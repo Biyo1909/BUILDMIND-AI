@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BuildMind AI — Construction Intelligence</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="grid-floor" aria-hidden="true"></div>
+<div class="scanline" aria-hidden="true"></div>
+
+<!-- ============ NAV ============ -->
+<nav class="topnav">
+  <div class="brand">
+    <span class="brand-mark">◈</span>
+    <span class="brand-name">BUILD<span class="accent">MIND</span></span>
+  </div>
+  <div class="nav-status">
+    <span class="dot"></span> SYSTEM ONLINE
+  </div>
+</nav>
+
+<!-- ============ SCREEN 1: HERO + WIZARD ============ -->
+<section id="screen-hero" class="screen active">
+  <div class="hero-copy">
+    <p class="eyebrow">AI CONSTRUCTION ENGINE — v0.9 PROTOTYPE</p>
+    <h1 class="hero-title">Describe the building.<br>Watch it <span class="accent">construct itself.</span></h1>
+    <p class="hero-sub">Budget in. Fully engineered, block-by-block construction simulation out — in seconds.</p>
+  </div>
+
+  <div class="wizard glass" id="wizard">
+
+    <div class="wizard-progress">
+      <div class="wp-step active" data-step="1"><span>01</span>Brief</div>
+      <div class="wp-step" data-step="2"><span>02</span>Site</div>
+      <div class="wp-step" data-step="3"><span>03</span>Style</div>
+      <div class="wp-bar"><div class="wp-fill" id="wpFill"></div></div>
+    </div>
+
+    <!-- STEP 1 -->
+    <div class="wizard-step active" data-step="1">
+      <label class="field">
+        <span class="field-label">Budget (USD)</span>
+        <input type="number" id="inpBudget" placeholder="250000" min="10000" step="5000">
+      </label>
+
+      <label class="field">
+        <span class="field-label">Building purpose</span>
+        <select id="inpPurpose">
+          <option value="residential">Residential home</option>
+          <option value="vacation">Vacation home</option>
+          <option value="office">Office building</option>
+          <option value="commercial">Commercial property</option>
+          <option value="hotel">Hotel</option>
+          <option value="warehouse">Warehouse</option>
+          <option value="mixed">Mixed-use development</option>
+        </select>
+      </label>
+
+      <div class="field-row">
+        <label class="field">
+          <span class="field-label">Bedrooms</span>
+          <input type="number" id="inpBed" min="0" max="20" value="4">
+        </label>
+        <label class="field">
+          <span class="field-label">Bathrooms</span>
+          <input type="number" id="inpBath" min="0" max="20" value="3">
+        </label>
+      </div>
+    </div>
+
+    <!-- STEP 2 -->
+    <div class="wizard-step" data-step="2">
+      <label class="field">
+        <span class="field-label">Country / City</span>
+        <input type="text" id="inpLocation" placeholder="Lagos, Nigeria">
+      </label>
+
+      <div class="field-row">
+        <label class="field">
+          <span class="field-label">Plot width (m)</span>
+          <input type="number" id="inpWidth" min="5" max="200" value="20">
+        </label>
+        <label class="field">
+          <span class="field-label">Plot depth (m)</span>
+          <input type="number" id="inpDepth" min="5" max="200" value="30">
+        </label>
+      </div>
+
+      <label class="field">
+        <span class="field-label">Floors</span>
+        <input type="range" id="inpFloors" min="1" max="12" value="2">
+        <span class="range-readout" id="floorsReadout">2 floors</span>
+      </label>
+
+      <label class="field">
+        <span class="field-label">Outdoor features</span>
+        <div class="chip-group" id="outdoorChips">
+          <button type="button" class="chip" data-val="pool">Pool</button>
+          <button type="button" class="chip" data-val="garden">Garden</button>
+          <button type="button" class="chip" data-val="terrace">Terrace</button>
+          <button type="button" class="chip" data-val="rooftop">Rooftop lounge</button>
+        </div>
+      </label>
+    </div>
+
+    <!-- STEP 3 -->
+    <div class="wizard-step" data-step="3">
+      <label class="field">
+        <span class="field-label">Architectural style</span>
+        <div class="chip-group single" id="styleChips">
+          <button type="button" class="chip" data-val="modern">Modern</button>
+          <button type="button" class="chip" data-val="futuristic">Futuristic</button>
+          <button type="button" class="chip" data-val="minimalist">Minimalist</button>
+          <button type="button" class="chip" data-val="luxury">Luxury</button>
+          <button type="button" class="chip" data-val="scandinavian">Scandinavian</button>
+        </div>
+      </label>
+
+      <label class="field">
+        <span class="field-label">Luxury level</span>
+        <input type="range" id="inpLuxury" min="1" max="5" value="3">
+        <span class="range-readout" id="luxuryReadout">Balanced</span>
+      </label>
+
+      <label class="field">
+        <span class="field-label">Sustainability priority</span>
+        <input type="range" id="inpSustain" min="1" max="5" value="3">
+        <span class="range-readout" id="sustainReadout">Standard</span>
+      </label>
+    </div>
+
+    <div class="wizard-nav">
+      <button class="btn ghost" id="btnBack" disabled>Back</button>
+      <button class="btn primary" id="btnNext">Continue →</button>
+    </div>
+  </div>
+</section>
+
+<!-- ============ SCREEN 2: GENERATED OPTIONS ============ -->
+<section id="screen-options" class="screen">
+  <div class="options-header">
+    <p class="eyebrow">3 OPTIONS GENERATED FOR YOUR BRIEF</p>
+    <h2 class="section-title">Select a design to begin construction</h2>
+  </div>
+  <div class="options-grid" id="optionsGrid"></div>
+  <button class="btn ghost" id="btnBackToWizard">← Edit brief</button>
+</section>
+
+<!-- ============ SCREEN 3: SIMULATOR ============ -->
+<section id="screen-sim" class="screen sim-screen">
+
+  <div class="sim-hud-top glass">
+    <div class="hud-block">
+      <span class="hud-label">PROJECT</span>
+      <span class="hud-value" id="hudProjectName">—</span>
+    </div>
+    <div class="hud-block">
+      <span class="hud-label">PROGRESS</span>
+      <span class="hud-value mono" id="hudProgress">0%</span>
+    </div>
+    <div class="hud-block">
+      <span class="hud-label">COMPONENTS BUILT</span>
+      <span class="hud-value mono" id="hudBlocks">0 / 0</span>
+    </div>
+    <div class="hud-block">
+      <span class="hud-label">EST. COST</span>
+      <span class="hud-value mono" id="hudCost">$0</span>
+    </div>
+    <div class="hud-block">
+      <span class="hud-label">PHASE</span>
+      <span class="hud-value" id="hudPhase">Idle</span>
+    </div>
+    <button class="btn ghost small" id="btnExitSim">✕ Exit</button>
+  </div>
+
+  <div class="sim-stage-wrap">
+    <div class="stage-perspective" id="stagePerspective"></div>
+  </div>
+
+  <div class="sim-hud-bottom glass">
+    <div class="hud-group">
+      <span class="hud-label">SPEED</span>
+      <div class="speed-buttons" id="speedButtons">
+        <button data-speed="0.5">0.5x</button>
+        <button data-speed="1" class="active">1x</button>
+        <button data-speed="2">2x</button>
+        <button data-speed="5">5x</button>
+        <button data-speed="10">10x</button>
+      </div>
+    </div>
+
+    <div class="hud-group">
+      <span class="hud-label">TRANSPORT</span>
+      <button class="icon-btn" id="btnPlayPause" title="Play / Pause">⏸</button>
+      <button class="icon-btn" id="btnRestart" title="Restart">↺</button>
+    </div>
+
+    <div class="hud-group">
+      <span class="hud-label">CAMERA</span>
+      <button class="icon-btn" id="btnAutoRotate" title="Toggle auto-rotate">⟳</button>
+      <button class="icon-btn" id="btnZoomIn" title="Zoom in">+</button>
+      <button class="icon-btn" id="btnZoomOut" title="Zoom out">−</button>
+      <button class="icon-btn" id="btnResetCam" title="Reset camera">⌂</button>
+    </div>
+
+    <div class="hud-group">
+      <span class="hud-label">VIEW</span>
+      <button class="icon-btn" id="btnInspectToggle" title="Inspect interior — see inside as you orbit">🔍</button>
+      <select id="floorPlanSelect" title="Floor to label"></select>
+    </div>
+
+    <div class="hud-group layer-group">
+      <span class="hud-label">LAYERS</span>
+      <select id="layerSelect">
+        <option value="full">Full build</option>
+        <option value="foundation">Foundation only</option>
+        <option value="structure">Structural frame</option>
+        <option value="walls">Walls</option>
+        <option value="roof">Roofing</option>
+        <option value="interior">Interior finishing</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="drag-hint" id="dragHint">Drag to rotate · Scroll to zoom</div>
+
+</section>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="script.js"></script>
+</body>
+</html>

@@ -62,15 +62,16 @@ function buildHouseSpec(fd) {
   const requested = home ? fd.bedrooms + fd.bathrooms + 2 : 0;
   if (requested > count) throw new Error(`This form has ${count} rooms. Reduce the bedroom/bathroom count or add another floor.`);
   const rate = ({ residential: 950, vacation: 1050, office: 1100, commercial: 900, hotel: 1350, warehouse: 550, mixed: 1150 }[fd.purpose]) * [0, .8, .9, 1, 1.2, 1.45][fd.luxury] * ({ modern: 1, minimalist: .94, luxury: 1.18, scandinavian: 1.04, futuristic: 1.15 }[fd.style]);
-  const outdoorCost = fd.outdoor.reduce((n, k) => n + ({ pool: 28000, garden: 7000, terrace: 9000 }[k] || 0), 0);
-  const usable = fd.budget / 1.12 - outdoorCost;
+  const outdoorAllowance = fd.outdoor.reduce((n, k) => n + ({ pool: 28000, garden: 7000, terrace: 9000 }[k] || 0), 0);
+  const garageAllowance = fd.garage ? 18000 : 0;
+  const usable = fd.budget / 1.12 - outdoorAllowance - garageAllowance;
   const aspect = form === 'sawtooth' ? 1.15 : form === 'pavilion' ? .86 : 1.03;
-  const maxW = (fd.width - 4) / 3;
+  const maxW = (fd.width - (fd.garage ? 10 : 4)) / 3;
   const maxD = (fd.depth - (fd.outdoor.includes('pool') ? 12 : 7)) / 3;
   const cw = Math.floor(Math.min(Math.sqrt(Math.max(0, usable) / rate / count * aspect), maxW, maxD * aspect) * 100) / 100;
   const cd = Math.floor(cw / aspect * 100) / 100;
   if (Math.min(cw, cd) < 4.8) {
-    const minBudget = Math.ceil((count * 4.8 * 4.8 * Math.max(aspect, 1 / aspect) * rate + outdoorCost) * 1.12 / 1000) * 1000;
+    const minBudget = Math.ceil((count * 4.8 * 4.8 * Math.max(aspect, 1 / aspect) * rate + outdoorAllowance + garageAllowance) * 1.12 / 1000) * 1000;
     throw new Error(`Not enough space or budget for this brief. Try fewer floors, a larger plot, or a budget of about ${money(minBudget)} or more. Rooms need at least 4.8 m on each side.`);
   }
   const W = cw * 3, D = cd * 3;
@@ -101,8 +102,9 @@ function buildHouseSpec(fd) {
     entry.type='living'; entry.label=fd.purpose === 'hotel' ? 'Reception lounge' : 'Welcome lounge';
     const last=rooms[rooms.length-1]; last.type='bath'; last.isBathroom=true; last.label='Washroom';
   }
-  const area = count*cw*cd, baseCost=area*rate, contingency=(baseCost+outdoorCost)*.12;
-  return { fd, theme, style:fd.style, purpose:fd.purpose, lux:fd.luxury, isHome:home, isOffice:['office','commercial','mixed'].includes(fd.purpose), isHotel:fd.purpose==='hotel', isWarehouse:fd.purpose==='warehouse', formType:form, formName:profile.name, description:profile.desc, floors:fd.floors, W,D,cw,cd, wallH:fd.floors*FLOOR_H, roofH:2.8, outdoor:fd.outdoor, rooms, roomPlan:byFloor, entry, area, rate, baseCost, outdoorCost, contingency, cost:baseCost+outdoorCost+contingency, bounds:{ minX:-fd.width/2, maxX:fd.width/2, minZ:-D/2-4, maxZ:-D/2-4+fd.depth } };
+  const area = count*cw*cd, sizingAllowance=(area*rate+outdoorAllowance+garageAllowance)*1.12;
+  const garage=fd.garage?{w:3.6,d:6.2,h:2.8,cx:fd.width/2-2.4,cz:-D/2+3.1}:null;
+  return { fd, theme, style:fd.style, purpose:fd.purpose, lux:fd.luxury, isHome:home, isOffice:['office','commercial','mixed'].includes(fd.purpose), isHotel:fd.purpose==='hotel', isWarehouse:fd.purpose==='warehouse', formType:form, formName:profile.name, description:profile.desc, floors:fd.floors, W,D,cw,cd, wallH:fd.floors*FLOOR_H, roofH:2.8, outdoor:fd.outdoor, rooms, roomPlan:byFloor, entry, area, sizingAllowance, garage, bounds:{ minX:-fd.width/2, maxX:fd.width/2, minZ:-D/2-4, maxZ:-D/2-4+fd.depth } };
 }
 function findRoom(spec, id) { return spec.rooms.find(r => r.id === id); }
 function roomPath(spec, startId, endId) {

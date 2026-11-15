@@ -13,7 +13,7 @@ function notify(message) {
 function readBrief() {
   return {purpose:$('#purpose').value, budget:Number($('#budget').value), location:$('#location').value.trim(), style:app.style,
     luxury:Number($('#luxury').value),width:Number($('#plotWidth').value),depth:Number($('#plotDepth').value),floors:Number($('#floors').value),
-    bedrooms:Number($('#bedrooms').value),bathrooms:Number($('#bathrooms').value),outdoor:$$('input[name=outdoor]:checked').map(i=>i.value)};
+    bedrooms:Number($('#bedrooms').value),bathrooms:Number($('#bathrooms').value),garage:$('#garage').checked,outdoor:$$('input[name=outdoor]:checked').map(i=>i.value)};
 }
 function validateBrief(fd) {
   for(const [key,min,max] of [['budget',100000,50000000],['width',20,120],['depth',24,120],['floors',1,4],['bedrooms',0,10],['bathrooms',0,10],['luxury',1,5]]) {
@@ -25,6 +25,77 @@ function setBusy(busy,message='Preparing your concept') {
   if(busy) { $('#loadState').hidden=false;$('#loadState strong').textContent=message; }
   else $('#loadState').hidden=true;
 }
+function clearInspection() {
+  if(app.selection?.box){scene3d.scene.remove(app.selection.box);app.selection.box.geometry.dispose();app.selection.box.material.dispose();}
+  app.selection=null;$('#itemInspector').hidden=true;delete document.body.dataset.inspect;
+}
+function objectVisible(obj) {
+  for(let node=obj;node;node=node.parent)if(!node.visible)return false;
+  return true;
+}
+function showInspection(id) {
+  const line=app.model.estimate.lines.find(item=>item.id===id);
+  if(!line)return;
+  clearInspection();stopTour();app.keys.clear();app.touch.clear();app.building=false;updateTimeline();scene3d.controls.autoRotate=false;
+  const obj=app.model.costObjects.get(id),visible=obj&&objectVisible(obj);
+  const box=visible?new THREE.BoxHelper(obj,0xbb7958):null;
+  if(box){box.material.depthTest=false;box.renderOrder=1000;scene3d.scene.add(box);}
+  app.selection={line,obj,box};document.body.dataset.inspect='true';
+  $('#inspectName').textContent=line.name;$('#inspectLocation').textContent=`${line.id.toUpperCase()} · ${line.location}`;
+  $('#inspectTotal').textContent=costMoney(line.totalCents);
+  $('#inspectMath').replaceChildren(...[
+    ['Quantity',`${costQuantity(line.quantity)} ${line.unit}`],
+    ['Supply / unit',costMoney(line.materialRateCents)],['Install / unit',costMoney(line.laborRateCents)],
+    ['Materials & products',costMoney(line.materialCents)],['Installation & labor',costMoney(line.laborCents)],
+  ].map(([label,value])=>{const row=document.createElement('div'),dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=label;dd.textContent=value;row.append(dt,dd);return row;}));
+  $('#inspectNote').textContent=line.note;
+  $('#inspectVisibility').textContent=!obj?'Allowance only · not separately modeled.':visible?'Highlighted in the model.':'This item is hidden in the current view or floor.';
+  $('#itemInspector').hidden=false;
+}
+function pickCost(clientX,clientY) {
+  if(!app.ready||app.busy||app.screen!=='studio'||$('#costBreakdown').open)return;
+  const rect=scene3d.renderer.domElement.getBoundingClientRect();
+  if(clientX<rect.left||clientX>rect.right||clientY<rect.top||clientY>rect.bottom)return;
+  const pointer=new THREE.Vector2((clientX-rect.left)/rect.width*2-1,-(clientY-rect.top)/rect.height*2+1);
+  const ray=new THREE.Raycaster();scene3d.scene.updateMatrixWorld(true);scene3d.camera.updateMatrixWorld();ray.setFromCamera(pointer,scene3d.camera);
+  const hits=ray.intersectObjects(app.model.units.filter(u=>u.obj.visible).map(u=>u.obj),true);
+  const hit=hits.find(h=>objectVisible(h.object));
+  if(!hit){clearInspection();return;}
+  let node=hit.object;
+  while(node&&!node.userData.costId)node=node.parent;
+  if(node)showInspection(node.userData.costId);
+}
+function renderCostRows() {
+  if(!app.model)return;
+  const query=$('#costSearch').value.trim().toLowerCase(),category=$('#costCategory').value,location=$('#costRoom').value;
+  const lines=app.model.estimate.lines.filter(line=>(category==='all'||line.group===category)&&(location==='all'||line.location===location)&&`${line.name} ${line.location} ${line.id}`.toLowerCase().includes(query));
+  $('#costRows').replaceChildren(...lines.map(line=>{
+    const row=document.createElement('tr'),name=document.createElement('td'),button=document.createElement('button'),meta=document.createElement('small');
+    button.textContent=line.name;button.dataset.costId=line.id;button.addEventListener('click',()=>{$('#costBreakdown').close();showInspection(line.id);$('#closeInspector').focus({preventScroll:true});});
+    meta.textContent=`${line.id.toUpperCase()} · ${line.location}${line.modeled?'':' · allowance only'}`;name.append(button,meta);row.append(name);
+    for(const text of [`${costQuantity(line.quantity)} ${line.unit}`,costMoney(line.materialRateCents),costMoney(line.laborRateCents),costMoney(line.totalCents)]){const cell=document.createElement('td');cell.textContent=text;row.append(cell);}
+    return row;
+  }));
+  $('#costEmpty').hidden=lines.length>0;
+  const sum=lines.reduce((total,line)=>total+line.totalCents,0);
+  $('#costFilterTotal').textContent=`${lines.length} of ${app.model.estimate.lines.length} items · Shown subtotal ${costMoney(sum)} · Project contingency is not included in this filtered subtotal.`;
+}
+function updateCostUI() {
+  const bill=app.model.estimate;
+  for(const [id,cents] of Object.entries({costValue:bill.totalCents,materialsCost:bill.materialCents,installationCost:bill.laborCents,contingencyCost:bill.contingencyCents,billMaterials:bill.materialCents,billLabor:bill.laborCents,billContingency:bill.contingencyCents,billTotal:bill.totalCents}))$('#'+id).textContent=costMoney(cents);
+  const delta=Math.round(app.spec.fd.budget*100)-bill.totalCents;
+  const balance=`${costMoney(Math.abs(delta))} ${delta<0?'over':'below'} your ${money(app.spec.fd.budget)} target. ${app.spec.garage?'Garage included.':'No garage selected.'}`;
+  $('#remainingCost').textContent=balance;$('#budgetBalance').textContent=balance;$('#budgetBalance').classList.toggle('over-budget',delta<0);
+  $('#costGroups').replaceChildren(...Object.entries(COST_GROUPS).map(([key,label])=>{const card=document.createElement('div'),name=document.createElement('span'),amount=document.createElement('strong');name.textContent=label;amount.textContent=costMoney(bill.groups[key]);card.append(name,amount);return card;}));
+  $('#costCategory').replaceChildren(new Option('All categories','all'),...Object.entries(COST_GROUPS).map(([key,label])=>new Option(label,key)));
+  $('#costRoom').replaceChildren(new Option('All locations','all'),...[...new Set(bill.lines.map(line=>line.location))].map(location=>new Option(location,location)));
+  $('#costSearch').value='';renderCostRows();
+}
+function openCostBreakdown() {
+  if(!app.ready)return;
+  clearInspection();stopTour();app.keys.clear();app.touch.clear();app.building=false;updateTimeline();scene3d.controls.autoRotate=false;
+  $('#costDetails').hidden=true;$('#costToggle').setAttribute('aria-expanded','false');renderCostRows();$('#costBreakdown').showModal();
+}
 async function generate(initial=false) {
   if(app.busy) return;
   let spec;
@@ -34,7 +105,7 @@ async function generate(initial=false) {
   setBusy(true);
   await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
   try {
-    stopTour(); app.keys.clear();app.touch.clear();app.building=false;
+    clearInspection();$('#costBreakdown').close();stopTour();app.keys.clear();app.touch.clear();app.building=false;
     app.transition++;$('#viewTransition').classList.remove('active');
     app.model=buildHouse(spec);app.spec=spec;app.floor=0;app.room=spec.entry;
     app.progress=1;
@@ -42,11 +113,7 @@ async function generate(initial=false) {
     $('#heroFormName').textContent=spec.formName;
     $('#conceptMeta').textContent=`${spec.theme.label} · ${spec.floors} ${spec.floors===1?'floor':'floors'}${spec.fd.location?' · '+spec.fd.location:''}`;
     $('#areaValue').textContent=`${Math.round(spec.area)} m²`;
-    $('#costValue').textContent=money(spec.cost);
-    $('#baseCost').textContent=money(spec.baseCost);
-    $('#outdoorCost').textContent=money(spec.outdoorCost);
-    $('#contingencyCost').textContent=money(spec.contingency);
-    $('#remainingCost').textContent=money(Math.max(0,spec.fd.budget-spec.cost));
+    updateCostUI();
     $('#viewFloor').replaceChildren(...Array.from({length:spec.floors},(_,f)=>new Option(f===0?'Ground floor':`Level ${f+1}`,f)));
     $('#projectStatus').textContent='Concept updated · '+spec.formName;
     $('#briefHint').textContent='Your choices are reflected in this concept.';
@@ -86,7 +153,7 @@ function showHome() {
 }
 function setMode(mode) {
   if(!app.spec)return;
-  stopTour();app.keys.clear();app.touch.clear();app.drag=null;app.transition++;
+  clearInspection();stopTour();app.keys.clear();app.touch.clear();app.drag=null;app.transition++;
   $('#viewTransition').classList.remove('active');app.mode=mode;document.body.dataset.mode=mode;
   if(mode!=='exterior'){app.progress=1;app.building=false;}
   scene3d.controls.autoRotate=false;
@@ -105,9 +172,10 @@ function setMode(mode) {
 function planCamera() {
   const {camera}=scene3d;
   camera.aspect=scene3d.mount.clientWidth/scene3d.mount.clientHeight;camera.updateProjectionMatrix();
-  const height=Math.max(app.spec.W/camera.aspect,app.spec.D)/Math.tan(THREE.MathUtils.degToRad(18))*.62;
-  camera.position.set(0,PLINTH+app.floor*FLOOR_H+height,0);
-  camera.up.set(0,0,-1);camera.lookAt(0,PLINTH+app.floor*FLOOR_H,0);
+  const garage=app.floor===0?app.spec.garage:null,minX=-app.spec.W/2,maxX=garage?Math.max(app.spec.W/2,garage.cx+garage.w/2+.15):app.spec.W/2;
+  const cx=(minX+maxX)/2,height=Math.max((maxX-minX)/camera.aspect,app.spec.D)/Math.tan(THREE.MathUtils.degToRad(18))*.62;
+  camera.position.set(cx,PLINTH+app.floor*FLOOR_H+height,0);
+  camera.up.set(0,0,-1);camera.lookAt(cx,PLINTH+app.floor*FLOOR_H,0);
 }
 function updateLights() {
   if(!app.model)return;
@@ -179,6 +247,7 @@ function lookAround() {
   scene3d.camera.quaternion.setFromEuler(new THREE.Euler(app.pitch,app.yaw,0,'YXZ'));
 }
 function transitionRoom(r) {
+  clearInspection();
   const token=++app.transition;
   $('#viewTransition').classList.add('active');app.route=[];
   setTimeout(()=>{
@@ -204,13 +273,14 @@ function nextRoom(direction=1) {
   changeRoom(list[(idx+direction+list.length)%list.length]);
 }
 function startTour() {
+  clearInspection();
   if(app.mode!=='walk')setMode('walk');
   app.tour=true;app.tourVisited=new Set([app.room.id]);app.dwell=0;app.route=[];placeInRoom(app.room);
   $('#tourPlay span').textContent='Pause guided tour';$('#walkStatus').textContent='Guided tour · every room, every floor';
 }
 function stopTour() {
   app.tour=false;app.route=[];app.dwell=0;
-  $('#tourPlay span').textContent='Start guided tour';$('#walkStatus').textContent='Drag to look · W A S D to walk';
+  $('#tourPlay span').textContent='Start guided tour';$('#walkStatus').textContent='Drag to look · Click an item for cost';
 }
 function nextTourRoom() {
   const sameFloor=app.spec.roomPlan[app.floor].filter(r=>!app.tourVisited.has(r.id));
@@ -247,7 +317,7 @@ function renderMap() {
   $('#miniPlan').innerHTML=rects+`<path d="M ${x} ${y} l ${-Math.sin(app.yaw)*10} ${-Math.cos(app.yaw)*10}" stroke="#a76947" stroke-width="2"/><circle cx="${x}" cy="${y}" r="3.5" fill="#a76947" stroke="#fff" stroke-width="1.5"/>`;
 }
 function tick(dt) {
-  if(!app.ready||app.busy)return;
+  if(!app.ready||app.busy||$('#costBreakdown').open)return;
   if(app.building){app.progress=Math.min(1,app.progress+dt/36*app.speed);if(app.progress===1)app.building=false;applyScene();updateTimeline();}
   if(app.mode!=='walk')return;
   if(app.route.length) {
@@ -296,6 +366,7 @@ for(const [id,factor] of [['zoomIn',.85],['zoomOut',1.18]]) $('#'+id).addEventLi
 });
 $('#costToggle').addEventListener('click',()=>{const open=$('#costDetails').hidden;$('#costDetails').hidden=!open;$('#costToggle').setAttribute('aria-expanded',String(open));});
 $('#viewFloor').addEventListener('change',()=>{
+  clearInspection();
   const floor=Number($('#viewFloor').value);
   if(app.mode==='walk'){stopTour();transitionRoom(app.spec.roomPlan[floor][0]);}
   else {app.floor=floor;app.room=app.spec.roomPlan[floor][0];planCamera();applyScene();updateRooms();}
@@ -307,25 +378,43 @@ $('#exitWalk').addEventListener('click',()=>setMode('exterior'));
 $('#replay').addEventListener('click',watchBuild);
 $('#pauseBuild').addEventListener('click',()=>{app.building=!app.building;updateTimeline();});
 $('#speed').addEventListener('change',()=>app.speed=Number($('#speed').value));
-$('#timeline').addEventListener('input',()=>{prepareTimeline();app.progress=Number($('#timeline').value)/1000;app.building=false;applyScene();updateTimeline();});
+$('#timeline').addEventListener('input',()=>{clearInspection();prepareTimeline();app.progress=Number($('#timeline').value)/1000;app.building=false;applyScene();updateTimeline();});
 $('#phaseMarkers').replaceChildren(...PHASES.map((p,i)=>{
   const b=document.createElement('button');b.textContent=p.name;b.title=p.desc;
   b.addEventListener('click',()=>{prepareTimeline();app.progress=(i+1)/8;app.building=false;applyScene();updateTimeline();});return b;
 }));
-const mount=$('#renderMount');
+for(const id of ['openCosts','fullCostOpen','inspectAllCosts'])$('#'+id).addEventListener('click',openCostBreakdown);
+$('#closeCosts').addEventListener('click',()=>$('#costBreakdown').close());
+$('#closeInspector').addEventListener('click',()=>{clearInspection();mount.focus({preventScroll:true});});
+for(const id of ['costSearch','costCategory','costRoom'])$('#'+id).addEventListener('input',renderCostRows);
+const mount=$('#renderMount'),pickPointers=new Set();
+let pickGesture=null;
 mount.addEventListener('pointerdown',e=>{
+  pickPointers.add(e.pointerId);
+  if(pickPointers.size===1&&e.button===0)pickGesture={x:e.clientX,y:e.clientY,id:e.pointerId,moved:false};
+  else pickGesture=null;
   if(app.mode!=='walk')return;
   stopTour();mount.focus({preventScroll:true});app.drag={x:e.clientX,y:e.clientY,id:e.pointerId};mount.setPointerCapture(e.pointerId);
 });
 mount.addEventListener('pointermove',e=>{
+  if(pickGesture&&Math.hypot(e.clientX-pickGesture.x,e.clientY-pickGesture.y)>7)pickGesture.moved=true;
   if(app.mode!=='walk'||!app.drag||app.drag.id!==e.pointerId)return;
   app.yaw-=(e.clientX-app.drag.x)*.004;app.pitch=clamp(app.pitch-(e.clientY-app.drag.y)*.003,-1.1,1.1);
   app.drag.x=e.clientX;app.drag.y=e.clientY;
 });
-for(const event of ['pointerup','pointercancel','lostpointercapture'])mount.addEventListener(event,()=>app.drag=null);
+mount.addEventListener('pointerup',e=>{
+  if(pickGesture?.id===e.pointerId&&!pickGesture.moved&&pickPointers.size===1)pickCost(e.clientX,e.clientY);
+  pickPointers.delete(e.pointerId);pickGesture=null;app.drag=null;
+},true);
+mount.addEventListener('pointercancel',e=>{pickPointers.delete(e.pointerId);pickGesture=null;app.drag=null;});
+mount.addEventListener('lostpointercapture',e=>{pickPointers.delete(e.pointerId);app.drag=null;});
 window.addEventListener('keydown',e=>{
   if(app.screen!=='studio')return;
-  if(e.key==='Escape'){if(app.mode==='walk')setMode('exterior');$('#briefPanel').classList.remove('open');$('#briefToggle').setAttribute('aria-expanded','false');return;}
+  if($('#costBreakdown').open)return;
+  if(e.key==='Escape'){
+    if(app.selection){clearInspection();return;}
+    if(app.mode==='walk')setMode('exterior');$('#briefPanel').classList.remove('open');$('#briefToggle').setAttribute('aria-expanded','false');return;
+  }
   if(app.mode!=='walk'||/INPUT|SELECT|TEXTAREA/.test(e.target.tagName)||e.ctrlKey||e.metaKey||e.altKey)return;
   const key=e.key.toLowerCase();
   if(['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright'].includes(key)){e.preventDefault();if(app.tour||app.route.length)stopTour();app.keys.add(key);}

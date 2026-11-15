@@ -10,8 +10,15 @@ function clearHouse() {
 function buildHouse(spec) {
   clearHouse();
   const M=MatLib, T=spec.theme, units=[], groups={}, colliders=[], lights=[];
+  const ledger=createCostLedger(spec),costObjects=new Map();
+  let room=null,scope='building';
+  const charge=(obj,[code,quantity=1,label=''])=>{
+    const line=ledger.add(code,quantity,{room,scope,label});
+    obj.userData.costId=line.id;costObjects.set(line.id,obj);return obj;
+  };
   PHASE_KEYS.forEach(k=>{ groups[k]=new THREE.Group(); scene3d.scene.add(groups[k]); });
-  const add=(phase,obj,floor=0,role='solid',label='')=>{
+  const add=(phase,obj,floor=0,role='solid',label='',quote=null)=>{
+    if(quote)charge(obj,quote);
     obj.traverse(m=>{ if(m.isMesh){ m.castShadow=role!=='glass'; m.receiveShadow=true; } });
     groups[phase].add(obj);
     units.push({obj,phase,floor,role,label,base:obj.position.clone(),scale:obj.scale.clone()});
@@ -26,7 +33,10 @@ function buildHouse(spec) {
   const metal=M.plain(T.frame,{roughness:.35,metalness:.6}), glow=M.lampGlow();
   const floorY=f=>PLINTH+f*FLOOR_H;
   const neighbor=(r,dx,dz,f=r.floor)=>spec.roomPlan[f]?.find(n=>n.gx===r.gx+dx&&n.gz===r.gz+dz);
-  const slab=(r,phase,y,mat,thickness=.18,over=0,role='slab')=>add(phase,_at(_box(spec.cw+over,thickness,spec.cd+over,mat),r.cx,y,r.cz),r.floor,role);
+  const slab=(r,phase,y,mat,thickness=.18,over=0,role='slab')=>{
+    const code=phase==='foundation'?'foundation':phase==='frame'?'floorSlab':phase==='interior'?(mat===wood?'timberFloor':'stoneFloor'):mat===plaster?'roofDeck':mat===wood?'deck':'flatRoof';
+    return add(phase,_at(_box(spec.cw+over,thickness,spec.cd+over,mat),r.cx,y,r.cz),r.floor,role,'',[code,(spec.cw+over)*(spec.cd+over)]);
+  };
   function wallRun(r,side,shared) {
     const horizontal=side==='front'||side==='back', len=horizontal?spec.cw:spec.cd;
     const x=side==='left'?r.x0:side==='right'?r.x1:r.cx;
@@ -41,26 +51,36 @@ function buildHouse(spec) {
     g.add(_at(_box(pier,FLOOR_H,.2,mat),-len/2+pier/2,FLOOR_H/2,0),_at(_box(pier,FLOOR_H,.2,mat),len/2-pier/2,FLOOR_H/2,0));
     g.add(_at(_box(opening,FLOOR_H-top,.2,mat),0,top+(FLOOR_H-top)/2,0));
     if(bottom) g.add(_at(_box(opening,bottom,.2,mat),0,bottom/2,0));
-    add(phase,g,r.floor,role);
+    const wallCode=shared?'partition':((r.gx+r.gz)%3===0?T.wing.kind:T.wall.kind)+'Wall';
+    add(phase,g,r.floor,role,'',[wallCode,len*FLOOR_H-opening*(top-bottom),`${COST_RATES[wallCode][0]} · ${side}`]);
     if(!shared&&!entry) {
       const w=new THREE.Group(); w.position.copy(g.position); w.rotation.copy(g.rotation);
       const h=top-bottom;
       w.add(_at(_box(opening,h,.025,glass),0,bottom+h/2,0));
       for(const xx of [-opening/2,0,opening/2]) w.add(_at(_box(.045,h,.085,metal),xx,bottom+h/2,0));
       for(const yy of [bottom,top]) w.add(_at(_box(opening+.08,.05,.085,metal),0,yy,0));
-      add('fixtures',w,r.floor,'glazing');
+      add('fixtures',w,r.floor,'glazing','',['window',opening*h,`Window assembly · ${side}`]);
       if((spec.style==='luxury'||spec.style==='futuristic')&&side==='front') {
-        for(let i=0;i<4;i++) add('fixtures',_at(_box(.045,2.8,.35,metal),x-len*.45+i*.16,y+1.5,z-.2),r.floor,'exterior');
+        for(let i=0;i<4;i++) add('fixtures',_at(_box(.045,2.8,.35,metal),x-len*.45+i*.16,y+1.5,z-.2),r.floor,'exterior','',['fin']);
       }
     }
-    if(shared) {
+    if(shared||entry) {
       const frame=new THREE.Group(); frame.position.copy(g.position); frame.rotation.copy(g.rotation);
       for(const xx of [-opening/2,opening/2]) frame.add(_at(_box(.055,2.55,.24,timber),xx,1.275,0));
       frame.add(_at(_box(opening+.1,.06,.24,timber),0,2.57,0));
-      add('interior',frame,r.floor,'partition');
+      frame.add(_at(_box(.05,2.48,1.45,timber),-opening/2,1.24,.75));
+      frame.add(_at(_box(.13,.035,.08,metal),-opening/2+.07,1.05,1.35));
+      add(shared?'interior':'fixtures',frame,r.floor,shared?'partition':'door','',[entry?'entryDoor':'door',1,`${entry?'Entrance':'Interior'} door · ${side}`]);
+      frame.updateMatrixWorld(true);
+      frame.traverse(mesh=>{
+        if(!mesh.isMesh)return;
+        const box=new THREE.Box3().setFromObject(mesh);
+        if(box.min.y<y+1.8)colliders.push({floor:r.floor,box});
+      });
     }
   }
   spec.rooms.forEach(r=>{
+    room=r;
     const y=floorY(r.floor);
     slab(r,r.floor?'frame':'foundation',y-.09,concrete);
     slab(r,'interior',y+.012,r.isBathroom||r.type==='kitchen'?stone:wood,.025,-.15,'finish');
@@ -69,10 +89,10 @@ function buildHouse(spec) {
       if(!n||r.id<n.id) wallRun(r,side,!!n);
       if(!n) {
         const horizontal=!dx;
-        add('frame',_at(_box(horizontal?spec.cw:.16,.18,horizontal?.16:spec.cd,trim),r.cx+dx*spec.cw/2,y+FLOOR_H-.08,r.cz+dz*spec.cd/2),r.floor,'exterior');
+        add('frame',_at(_box(horizontal?spec.cw:.16,.18,horizontal?.16:spec.cd,trim),r.cx+dx*spec.cw/2,y+FLOOR_H-.08,r.cz+dz*spec.cd/2),r.floor,'exterior','',['beam',horizontal?spec.cw:spec.cd]);
       }
     }
-    for(const [sx,sz] of [[-1,-1],[1,1]]) add('frame',_at(_box(.16,FLOOR_H,.16,concrete),r.cx+sx*(spec.cw/2-.12),y+FLOOR_H/2,r.cz+sz*(spec.cd/2-.12)),r.floor,'exterior');
+    for(const [sx,sz] of [[-1,-1],[1,1]]) add('frame',_at(_box(.16,FLOOR_H,.16,concrete),r.cx+sx*(spec.cw/2-.12),y+FLOOR_H/2,r.cz+sz*(spec.cd/2-.12)),r.floor,'exterior','',['column',FLOOR_H]);
     const above=neighbor(r,0,0,r.floor+1);
     if(!above) {
       const pitched=spec.style==='scandinavian'||spec.formType==='pavilion'||spec.formType==='sawtooth';
@@ -84,34 +104,35 @@ function buildHouse(spec) {
         const material=M.get('metal',T.roof,[2,2],{side:THREE.DoubleSide});
         for(const s of [-1,1]) {
           const p=_at(_box(half/Math.cos(angle),.12,spec.cd+.55,material),r.cx+s*half/2,ry+.1+height/2,r.cz);
-          p.rotation.z=-s*angle; add('roof',p,r.floor,'roof');
+          p.rotation.z=-s*angle; add('roof',p,r.floor,'roof','',['pitchedRoof',half/Math.cos(angle)*(spec.cd+.55)]);
         }
         const shape=new THREE.Shape(); shape.moveTo(-spec.cw/2,0);shape.lineTo(spec.cw/2,0);shape.lineTo(0,height);shape.closePath();
-        for(const zz of [r.z0,r.z1]) add('roof',_at(new THREE.Mesh(new THREE.ExtrudeGeometry(shape,{depth:.12,bevelEnabled:false}),timber),r.cx,ry+.1,zz),r.floor,'roof');
+        for(const zz of [r.z0,r.z1]) add('roof',_at(new THREE.Mesh(new THREE.ExtrudeGeometry(shape,{depth:.12,bevelEnabled:false}),timber),r.cx,ry+.1,zz),r.floor,'roof','',[T.wing.kind+'Wall',spec.cw*height/2,'Gable wall']);
       } else {
         slab(r,'roof',ry+.15,roofMat,.16,.4,'roof');
         for(const [dx,dz] of [[0,-1],[0,1],[-1,0],[1,0]]) {
           if(neighbor(r,dx,dz)&&!neighbor(r,dx,dz,r.floor+1)) continue;
           const horizontal=!dx;
-          add('roof',_at(_box(horizontal?spec.cw+.4:.12,.34,horizontal?.12:spec.cd+.4,wall),r.cx+dx*(spec.cw/2+.13),ry+.35,r.cz+dz*(spec.cd/2+.13)),r.floor,'roof');
+          add('roof',_at(_box(horizontal?spec.cw+.4:.12,.34,horizontal?.12:spec.cd+.4,wall),r.cx+dx*(spec.cw/2+.13),ry+.35,r.cz+dz*(spec.cd/2+.13)),r.floor,'roof','',['parapet',(horizontal?spec.cw:spec.cd)+.4]);
         }
         if(spec.style==='futuristic') {
           const canopy=_at(_box(spec.cw+.8,.14,spec.cd*.6,wall),r.cx,ry+.85,r.cz);
-          canopy.rotation.z=(r.gx%2?1:-1)*.12; add('roof',canopy,r.floor,'roof');
+          canopy.rotation.z=(r.gx%2?1:-1)*.12; add('roof',canopy,r.floor,'roof','',['canopy',(spec.cw+.8)*spec.cd*.6]);
         }
       }
       if(r.floor<spec.floors-1) {
         slab(r,'roof',ry+.25,wood,.06,-.4,'roof');
-        for(const side of [-1,1]) add('roof',_at(_box(spec.cw, .95,.035,glass),r.cx,ry+.78,r.cz+side*spec.cd/2),r.floor,'roof');
+        for(const side of [-1,1]) add('roof',_at(_box(spec.cw,.95,.035,glass),r.cx,ry+.78,r.cz+side*spec.cd/2),r.floor,'roof','',['railing',spec.cw]);
       }
     }
   });
-  const e=spec.entry;
-  add('fixtures',_at(_box(2.6,.14,1.7,timber),e.cx,PLINTH+2.95,e.z0-.65),0,'exterior');
-  for(const x of [-1,1]) add('fixtures',_at(_box(.12,.5,.12,glow),e.cx+x*1.03,PLINTH+1.9,e.z0-.18),0,'exterior');
-  add('foundation',_at(_box(2.5,.14,1.2,concrete),e.cx,.07,e.z0-.65),0,'site');
+  const e=spec.entry;room=e;
+  add('fixtures',_at(_box(2.6,.14,1.7,timber),e.cx,PLINTH+2.95,e.z0-.65),0,'exterior','',['canopy',2.6*1.7]);
+  for(const x of [-1,1]) add('fixtures',_at(_box(.12,.5,.12,glow),e.cx+x*1.03,PLINTH+1.9,e.z0-.18),0,'exterior','',['wallLight']);
+  add('foundation',_at(_box(2.5,.14,1.2,concrete),e.cx,.07,e.z0-.65),0,'site','',['step',2.5*1.2]);
 
-  const factory=createFurnitureFactory(spec), mk=factory.make;
+  const factory=createFurnitureFactory(spec);
+  const mk=Object.fromEntries(Object.entries(factory.make).map(([code,make])=>[code,(...args)=>charge(make(...args),[code])]));
   function staged(r,obj,qx,qz,label) {
     const bb=new THREE.Box3().setFromObject(obj), size=bb.getSize(new THREE.Vector3());
     const zw=spec.cw/2-.85, zd=spec.cd/2-.85;
@@ -127,6 +148,7 @@ function buildHouse(spec) {
     });
   }
   spec.rooms.forEach(r=>{
+    room=r;
     if(r.type==='living') {
       staged(r,mk.sofa(2.5),-1,1,'Upholstered sofa');
       staged(r,_grp(mk.coffeeTable(),_at(mk.armchair(),1.25,0,.2)),1,1,'Lounge seating');
@@ -159,43 +181,67 @@ function buildHouse(spec) {
     scene3d.scene.add(light); lights.push(light);
   });
 
+  room=null;scope='outdoors';
   const B=spec.bounds, plotW=B.maxX-B.minX, plotD=B.maxZ-B.minZ;
   const landscape=M.get('grass',0x7b8660,[10,10]), paving=M.get('travertine',0xd5cdb7,[4,3]);
-  add('site',_at(_box(plotW,.12,plotD,landscape),0,-.1,(B.minZ+B.maxZ)/2),0,'landscape');
-  for(const [dx,dz] of [[1,0],[-1,0],[0,1],[0,-1]]) add('site',_at(_box(dx?.12:plotW,.1,dz?.12:plotD,concrete),dx*plotW/2,-.01,(B.minZ+B.maxZ)/2+dz*plotD/2),0,'landscape');
+  add('site',_at(_box(plotW,.12,plotD,landscape),0,-.1,(B.minZ+B.maxZ)/2),0,'landscape','',['siteBase',plotW*plotD]);
+  for(const [dx,dz] of [[1,0],[-1,0],[0,1],[0,-1]]) add('site',_at(_box(dx?.12:plotW,.1,dz?.12:plotD,concrete),dx*plotW/2,-.01,(B.minZ+B.maxZ)/2+dz*plotD/2),0,'landscape','',['edging',dx?plotD:plotW]);
   const pathD=e.z0-B.minZ;
-  add('site',_at(_box(2.2,.04,pathD,paving),e.cx,.015,B.minZ+pathD/2),0,'landscape');
+  add('site',_at(_box(2.2,.04,pathD,paving),e.cx,.015,B.minZ+pathD/2),0,'landscape','',['paving',2.2*pathD,'Entrance path']);
   const occupied=new Set(spec.roomPlan[0].map(r=>`${r.gx},${r.gz}`));
   for(let x=0;x<3;x++) for(let z=0;z<3;z++) if(!occupied.has(`${x},${z}`)) {
-    add('site',_at(_box(spec.cw-.3,.04,spec.cd-.3,paving),(x-1)*spec.cw,.012,(z-1)*spec.cd),0,'landscape');
+    add('site',_at(_box(spec.cw-.3,.04,spec.cd-.3,paving),(x-1)*spec.cw,.012,(z-1)*spec.cd),0,'landscape','',['paving',(spec.cw-.3)*(spec.cd-.3),'Courtyard paving']);
     if(spec.outdoor.includes('garden')) {
-      add('site',_at(_box(1.6,.3,1.6,concrete),(x-1)*spec.cw,.15,(z-1)*spec.cd),0,'landscape');
-      add('site',_at(makeTree(3.6),(x-1)*spec.cw,.3,(z-1)*spec.cd),0,'landscape');
+      add('site',_at(_box(1.6,.3,1.6,concrete),(x-1)*spec.cw,.15,(z-1)*spec.cd),0,'landscape','',['planter']);
+      add('site',_at(makeTree(3.6),(x-1)*spec.cw,.3,(z-1)*spec.cd),0,'landscape','',['tree']);
     }
   }
   if(spec.outdoor.includes('pool')) {
     const w=Math.min(8,plotW*.4), d=3.1, z=spec.D/2+3.8;
-    add('site',_at(_box(w+1.5,.08,d+1.5,paving),0,.04,z),0,'landscape');
-    add('site',_at(_box(w,.04,d,M.water()),0,.09,z),0,'water');
+    add('site',_at(_box(w+1.5,.08,d+1.5,paving),0,.04,z),0,'landscape','',['paving',(w+1.5)*(d+1.5)-w*d,'Pool surround paving']);
+    add('site',_at(_box(w,.04,d,M.water()),0,.09,z),0,'water','',['pool',w*d]);
+    ledger.add('poolPlant',1,{scope,modeled:false});
     for(const x of [-w/3,w/3]) {
       const chair=mk.loungeChair();chair.rotation.y=Math.PI;chair.position.set(x,.08,z+d/2+1);
       add('site',chair,0,'landscape');
     }
   }
   if(spec.outdoor.includes('terrace')) {
-    add('site',_at(_box(spec.cw,.13,2.3,wood),0,.04,spec.D/2+1.3),0,'landscape');
+    add('site',_at(_box(spec.cw,.13,2.3,wood),0,.04,spec.D/2+1.3),0,'landscape','',['deck',spec.cw*2.3]);
     const dining=mk.diningTable(1.8);dining.position.set(0,.11,spec.D/2+1.3);add('site',dining,0,'landscape');
   }
   if(spec.outdoor.includes('garden')) {
     for(const side of [-1,1]) for(let i=0;i<3;i++) {
-      add('site',_at(makeTree(3.2+i*.4),side*(plotW/2-1.1),0,B.minZ+3+i*(plotD-6)/3),0,'landscape');
+      const x=side*(plotW/2-1.1),z=B.minZ+3+i*(plotD-6)/3,g=spec.garage;
+      if(g&&Math.abs(x-g.cx)<g.w/2+1.2&&z<g.cz+g.d/2+1.2)continue;
+      add('site',_at(makeTree(3.2+i*.4),x,0,z),0,'landscape','',['tree']);
     }
   }
+  if(spec.garage) {
+    scope='garage';
+    const g=spec.garage,y=.18,front=g.cz-g.d/2,opening=2.7,doorH=2.25,pier=(g.w-opening)/2;
+    add('foundation',_at(_box(g.w,.18,g.d,concrete),g.cx,y/2,g.cz),0,'garage','',['foundation',g.w*g.d,'Garage foundation & slab']);
+    for(const side of [-1,1])add('walls',_at(_box(.2,g.h,g.d,wall),g.cx+side*g.w/2,y+g.h/2,g.cz),0,'garage','',[T.wall.kind+'Wall',g.d*g.h,`Garage ${side<0?'left':'right'} wall`]);
+    add('walls',_at(_box(g.w,g.h,.2,wall),g.cx,y+g.h/2,g.cz+g.d/2),0,'garage','',[T.wall.kind+'Wall',g.w*g.h,'Garage rear wall']);
+    const frontWall=_grp(_at(_box(pier,g.h,.2,wall),-g.w/2+pier/2,g.h/2,0),_at(_box(pier,g.h,.2,wall),g.w/2-pier/2,g.h/2,0),_at(_box(opening,g.h-doorH,.2,wall),0,doorH+(g.h-doorH)/2,0));
+    frontWall.position.set(g.cx,y,front);
+    add('walls',frontWall,0,'garage','',[T.wall.kind+'Wall',g.w*g.h-opening*doorH,'Garage front wall']);
+    const door=new THREE.Group();door.position.set(g.cx,y,front-.06);
+    for(let i=0;i<6;i++)door.add(_at(_box(opening,doorH/6-.015,.08,metal),0,(i+.5)*doorH/6,0));
+    door.add(_at(_box(.35,.05,.08,trim),0,.95,-.07));
+    add('fixtures',door,0,'garage','',['garageDoor']);
+    add('roof',_at(_box(g.w+.3,.16,g.d+.3,concrete),g.cx,y+g.h,g.cz),0,'roof','',['roofDeck',(g.w+.3)*(g.d+.3),'Garage roof deck']);
+    add('roof',_at(_box(g.w+.3,.05,g.d+.3,roofMat),g.cx,y+g.h+.11,g.cz),0,'roof','',['flatRoof',(g.w+.3)*(g.d+.3),'Garage roof covering']);
+    add('site',_at(_box(g.w,.05,front-B.minZ,paving),g.cx,.025,(front+B.minZ)/2),0,'garage','',['paving',g.w*(front-B.minZ),'Garage driveway']);
+    add('fixtures',_at(_box(.12,.4,.12,glow),g.cx+g.w/2-.2,y+2.4,front-.17),0,'garage','',['wallLight']);
+    ledger.add('electrical',g.w*g.d,{scope,modeled:false});
+  }
+  for(const code of ['electrical','plumbing','ventilation','preliminaries'])ledger.add(code,spec.area,{modeled:false});
   scene3d.groups=groups; scene3d.spec=spec;scene3d.interiorLights=lights;
   scene3d.scene.updateMatrixWorld(true);
   units.sort((a,b)=>PHASE_KEYS.indexOf(a.phase)-PHASE_KEYS.indexOf(b.phase)||a.floor-b.floor);
   setLighting(scene3d.lighting);
-  return {units,groups,colliders,lights};
+  return {units,groups,colliders,lights,estimate:ledger.finish(),costObjects};
 }
 function makeTree(h) {
   const trunk=MatLib.plain(0x716049),leaf=MatLib.plain(0x6f7e4f,{roughness:.95});

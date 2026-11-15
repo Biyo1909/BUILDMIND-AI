@@ -371,7 +371,7 @@ const MatLib = (() => {
     const key = 'plain|' + color + '|' + JSON.stringify(o);
     if (matCache.has(key)) return matCache.get(key);
     const mat = new THREE.MeshStandardMaterial({
-      color,
+      color: new THREE.Color(color).convertSRGBToLinear(),
       roughness: o.roughness ?? 0.7,
       metalness: o.metalness ?? 0,
       envMapIntensity: o.envMapIntensity ?? 0.9,

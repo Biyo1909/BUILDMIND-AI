@@ -12,12 +12,12 @@ const scene3d = {
 const LIGHTING = {
   day: {
     elev: 42, azim: 205, turbidity: 4.5, rayleigh: 1.0, mie: 0.004, mieG: 0.8,
-    exposure: 0.62, sunColor: 0xfff1de, sunI: 2.3, hemiSky: 0xcfe0ff, hemiGround: 0x6f6a55, hemiI: 0.55,
-    fog: 0xc7d3de, fogDensity: 0.0032, window: 0, lamp: 0.25, interior: 0, env: 0.85,
+    exposure: 0.7, sunColor: 0xfff1de, sunI: 1.8, hemiSky: 0xe8eddf, hemiGround: 0xb9ad93, hemiI: 0.6,
+    fog: 0xeeeae0, fogDensity: 0.004, window: 0, lamp: 0.3, interior: 0.65, env: 0.18,
   },
   golden: {
     elev: 7, azim: 245, turbidity: 8, rayleigh: 2.4, mie: 0.006, mieG: 0.88,
-    exposure: 0.5, sunColor: 0xffa860, sunI: 2.5, hemiSky: 0xffc89c, hemiGround: 0x4d3d30, hemiI: 0.42,
+    exposure: 0.8, sunColor: 0xffbf85, sunI: 2.0, hemiSky: 0xffdfb7, hemiGround: 0x93806c, hemiI: 0.65,
     fog: 0xd9a983, fogDensity: 0.0036, window: 0.55, lamp: 1.4, interior: 0.9, env: 0.8,
   },
   night: {
@@ -76,6 +76,7 @@ function initRenderer(mount, opts = {}) {
 
   const sky = new THREE.Sky();
   sky.scale.setScalar(2400);
+  sky.visible = false;
   scene.add(sky);
 
   const envScene = new THREE.Scene();
@@ -85,7 +86,7 @@ function initRenderer(mount, opts = {}) {
 
   const sun = new THREE.DirectionalLight(0xffffff, 2);
   sun.castShadow = true;
-  const sm = opts.shadowMap || (isMobileGPU ? 2048 : 4096);
+  const sm = opts.shadowMap || 2048;
   sun.shadow.mapSize.set(sm, sm);
   sun.shadow.bias = -0.00025;
   sun.shadow.normalBias = 0.035;
@@ -94,10 +95,10 @@ function initRenderer(mount, opts = {}) {
   const hemi = new THREE.HemisphereLight(0xcfe0ff, 0x6f6a55, 0.55);
   scene.add(hemi);
 
-  const grassMat = MatLib.get('grass', 0x5f7f3c, [260, 260]);
+  const grassMat = MatLib.plain(0xe4dfd2, { roughness: 1 });
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(1100, 1100), grassMat);
   ground.rotation.x = -Math.PI / 2;
-  ground.position.y = -0.01;
+  ground.position.y = -0.2;
   ground.receiveShadow = true;
   scene.add(ground);
 
@@ -123,6 +124,7 @@ function initRenderer(mount, opts = {}) {
     camera.aspect = nw / nh;
     camera.updateProjectionMatrix();
     renderer.setSize(nw, nh);
+    if (opts.onResize) opts.onResize();
   });
   scene3d.ro.observe(mount);
 
@@ -136,8 +138,8 @@ function initRenderer(mount, opts = {}) {
       const dt = Math.min(0.1, (now - last) / 1000);
       last = now;
       scene3d.hooks.forEach(fn => fn(dt));
-      if (controls) controls.update();
-      renderer.render(scene, camera);
+      if (controls && controls.enabled) controls.update();
+      if (!document.hidden) renderer.render(scene, camera);
     })(last);
   }
   return scene3d;
@@ -152,6 +154,7 @@ function sunDirection(elevDeg, azimDeg) {
 function setLighting(mode) {
   const L = LIGHTING[mode] || LIGHTING.day;
   scene3d.lighting = mode;
+  document.body.dataset.lighting = mode;
   const { renderer, scene, sky, envSky, sun, hemi, pmrem } = scene3d;
   if (!renderer) return;
 
@@ -166,6 +169,7 @@ function setLighting(mode) {
   });
 
   renderer.toneMappingExposure = L.exposure;
+  scene.background = new THREE.Color(L.fog);
   scene.fog.color.setHex(L.fog);
   scene.fog.density = L.fogDensity;
 
@@ -232,8 +236,14 @@ function heroCameraPose(spec, angle = -0.95, distMul = 1, elevMul = 1) {
 }
 
 function frameCamera(spec) {
+  const { camera, mount, controls } = scene3d;
+  camera.aspect = mount.clientWidth / mount.clientHeight;
+  camera.updateProjectionMatrix();
   const { pos, target } = heroCameraPose(spec);
-  scene3d.camera.position.copy(pos);
-  if (scene3d.controls) { scene3d.controls.target.copy(target); scene3d.controls.update(); }
-  else scene3d.camera.lookAt(target);
+  pos.sub(target).multiplyScalar(Math.max(1, 1.3 / camera.aspect)).add(target);
+  camera.position.copy(pos);
+  if (controls) {
+    controls.maxDistance = Math.max(260, pos.distanceTo(target) * 1.8);
+    controls.target.copy(target); controls.update();
+  } else camera.lookAt(target);
 }

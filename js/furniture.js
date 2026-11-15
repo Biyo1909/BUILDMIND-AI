@@ -421,10 +421,10 @@ function createFurnitureFactory(spec) {
     },
     rack(len = 2.7) {
       const g = new THREE.Group();
-      const H = 3.6;
+      const H = 2.8;
       for (const sx of [-1, 1]) for (const sz of [-1, 1]) g.add(at(box(0.08, H, 0.08, mat.rackBlue), sx * (len / 2 - 0.04), H / 2, sz * 0.5));
       for (let l = 0; l < 3; l++) {
-        const y = 0.15 + l * 1.2;
+        const y = 0.15 + l * 0.9;
         for (const sz of [-1, 1]) g.add(at(box(len, 0.1, 0.06, mat.rack), 0, y, sz * 0.5));
         for (let p = 0; p < 2; p++) {
           const px = (p ? 1 : -1) * len / 4;
@@ -690,5 +690,5 @@ function createFurnitureFactory(spec) {
     function finish() { return items; }
   }
 
-  return { furnishRoom };
+  return { furnishRoom, make: mk };
 }
